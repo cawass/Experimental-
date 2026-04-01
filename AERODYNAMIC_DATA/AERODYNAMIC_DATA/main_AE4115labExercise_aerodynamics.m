@@ -24,15 +24,17 @@ diskPath = './DATA/';
 % structure and these must start with a letter, so you will need to replace
 % the first character with a letter. For the + and - signs this has already
 % been implemented.
-fn_BAL = {'raw_A.txt',...
-          'raw_B.txt'};
+fn_BAL = {'raw_elevator0rudder0.txt',...
+          'raw_elevator-10rudder0.txt',...
+          'raw_elevatorp10rudder0.txt'};
 
 % filename(s) of the zero-measurement (tare) data files. Define an entry
 % per raw data files. In case multiple zero-measurements are available for
 % a datapoint, then add a structure with the filenames of the zero 
 % measurements at the index of that datapoint.
-fn0 = {'zer_ 20220216-085611.txt',...
-       'zer_ 20240228-122053.txt'}; 
+fn0 = {'zer_ 20260227-084922.txt',...
+       'zer_ 20260227-084922.txt',...
+       'zer_ 20260227-084922.txt'}; 
    
 % wing geometry
 b     = 1.4*cosd(4); % span [m]
