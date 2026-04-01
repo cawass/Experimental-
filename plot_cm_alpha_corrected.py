@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from Data_Loader import read_bal_file
+from Data_Loader import add_operating_columns, read_bal_file
 
 
 CM_COLUMN = "Cm_pitch"
@@ -42,27 +42,40 @@ def load_corrected_rows(bal_dir: Path) -> pd.DataFrame:
     if data.empty:
         return data
 
-    for col in [ALPHA_COLUMN, BETA_COLUMN, CM_COLUMN, VELOCITY_COLUMN]:
+    for col in ["Run_nr", ALPHA_COLUMN, BETA_COLUMN, CM_COLUMN, VELOCITY_COLUMN]:
         data[col] = pd.to_numeric(data[col], errors="coerce")
 
-    data = data.dropna(subset=[ALPHA_COLUMN, BETA_COLUMN, CM_COLUMN, VELOCITY_COLUMN]).copy()
+    data = data.dropna(subset=["Run_nr", ALPHA_COLUMN, BETA_COLUMN, CM_COLUMN]).copy()
+    data["Run_nr"] = data["Run_nr"].astype(int)
+    data = add_operating_columns(data)
 
     # Collapse tiny measurement jitter (-0.004, 7.996, 11.995, etc.) onto nominal alpha test points.
     data["alpha_nominal_deg"] = data[ALPHA_COLUMN].round(0).astype(int)
-    data["V_nominal_ms"] = np.where(data[VELOCITY_COLUMN] < 30.0, 20, 40)
     return data
+
+
+def join_unique_tags(values: pd.Series) -> str:
+    tags = sorted({str(v) for v in values.dropna() if str(v).strip()})
+    return "/".join(tags) if tags else "NA"
 
 
 def build_curve_summary(data: pd.DataFrame) -> pd.DataFrame:
     grouped = (
-        data.groupby(["delta_e_deg", "V_nominal_ms", "alpha_nominal_deg"], as_index=False)
+        data.groupby(
+            ["delta_e_deg", "V_nominal", "prop_speed_hz", "alpha_nominal_deg"],
+            as_index=False,
+            dropna=False,
+        )
         .agg(
             cm_mean=(CM_COLUMN, "mean"),
             cm_std=(CM_COLUMN, "std"),
             sample_count=(CM_COLUMN, "size"),
             beta_mean=(BETA_COLUMN, "mean"),
+            j_mean=("advance_ratio_J", "mean"),
+            j_nominal=("advance_ratio_nominal_J", "median"),
+            test_block=("test_block", join_unique_tags),
         )
-        .sort_values(["delta_e_deg", "V_nominal_ms", "alpha_nominal_deg"])
+        .sort_values(["delta_e_deg", "V_nominal", "prop_speed_hz", "alpha_nominal_deg"])
     )
 
     grouped["cm_std"] = grouped["cm_std"].fillna(0.0)
@@ -70,46 +83,86 @@ def build_curve_summary(data: pd.DataFrame) -> pd.DataFrame:
 
 
 def plot_curves(summary: pd.DataFrame, output_path: Path) -> None:
-    fig, ax = plt.subplots(figsize=(10.2, 6.0), constrained_layout=True)
+    elevator_levels = sorted(summary["delta_e_deg"].dropna().unique().astype(int).tolist())
+    if not elevator_levels:
+        raise ValueError("No elevator levels found for plotting.")
 
-    colors = {-10: "#1f77b4", 0: "#ff7f0e", 10: "#2ca02c"}
-    line_styles = {20: "--", 40: "-"}
-    markers = {20: "s", 40: "o"}
+    fig, axes = plt.subplots(
+        len(elevator_levels),
+        1,
+        figsize=(11.2, 3.6 * len(elevator_levels)),
+        sharex=True,
+        constrained_layout=True,
+    )
+    if len(elevator_levels) == 1:
+        axes = [axes]
 
-    for (delta_e_deg, v_nominal), curve in summary.groupby(["delta_e_deg", "V_nominal_ms"], sort=True):
-        curve = curve.sort_values("alpha_nominal_deg")
-        label = (
-            f"delta_e={delta_e_deg:+d} deg, "
-            f"V~{v_nominal:d} m/s, "
-            f"beta~{curve['beta_mean'].mean():.1f} deg, "
-            f"samples={int(curve['sample_count'].sum())}"
-        )
+    marker_by_velocity = {20: "s", 40: "o"}
+    style_cycle = ["-", "--", "-.", ":"]
 
-        ax.plot(
-            curve["alpha_nominal_deg"],
-            curve["cm_mean"],
-            linestyle=line_styles.get(v_nominal, "-"),
-            marker=markers.get(v_nominal, "o"),
-            color=colors.get(delta_e_deg, None),
-            linewidth=1.9,
-            markersize=5.5,
-            label=label,
-        )
-        ax.fill_between(
-            curve["alpha_nominal_deg"],
-            curve["cm_mean"] - curve["cm_std"],
-            curve["cm_mean"] + curve["cm_std"],
-            color=colors.get(delta_e_deg, "#666666"),
-            alpha=0.12,
-            linewidth=0.0,
-        )
+    for ax, delta_e in zip(axes, elevator_levels):
+        subplot = summary[summary["delta_e_deg"] == delta_e].copy()
+        if subplot.empty:
+            continue
 
-    ax.set_title("Corrected BAL Data: Cm vs Alpha Curves")
-    ax.set_xlabel("alpha (deg)")
-    ax.set_ylabel("Cm (Cm_pitch)")
-    ax.grid(True, linestyle="--", alpha=0.35)
-    ax.legend(title="Curve meaning", loc="best", fontsize=8.8, title_fontsize=9.2, framealpha=0.95)
+        n_levels = sorted(subplot["prop_speed_hz"].dropna().unique().tolist())
+        style_by_n = {float(n): style_cycle[i % len(style_cycle)] for i, n in enumerate(n_levels)}
+        cmap = plt.get_cmap("tab10")
 
+        for i, ((v_nominal, n_hz), curve) in enumerate(
+            subplot.groupby(["V_nominal", "prop_speed_hz"], sort=True, dropna=False)
+        ):
+            curve = curve.sort_values("alpha_nominal_deg")
+            total_samples = int(curve["sample_count"].sum())
+            block_tag = join_unique_tags(curve["test_block"])
+            beta_mean = float(curve["beta_mean"].mean())
+
+            if pd.isna(n_hz):
+                n_text = "n=FREE"
+                j_text = "J=n/a"
+                linestyle = "-"
+            else:
+                n_hz_float = float(n_hz)
+                n_text = f"n={n_hz_float:.1f} Hz"
+                j_value = float(curve["j_nominal"].median())
+                if np.isnan(j_value):
+                    j_value = float(curve["j_mean"].mean())
+                j_text = f"J={j_value:.2f}"
+                linestyle = style_by_n.get(n_hz_float, "-")
+
+            marker = marker_by_velocity.get(int(round(float(v_nominal))), "o")
+            label = (
+                f"V~{int(round(float(v_nominal)))} m/s, {n_text}, {j_text}, "
+                f"block={block_tag}, beta~{beta_mean:.1f}, samples={total_samples}"
+            )
+            color = cmap(i % 10)
+
+            ax.plot(
+                curve["alpha_nominal_deg"],
+                curve["cm_mean"],
+                linestyle=linestyle,
+                marker=marker,
+                color=color,
+                linewidth=1.8,
+                markersize=5.1,
+                label=label,
+            )
+            ax.fill_between(
+                curve["alpha_nominal_deg"],
+                curve["cm_mean"] - curve["cm_std"],
+                curve["cm_mean"] + curve["cm_std"],
+                color=color,
+                alpha=0.10,
+                linewidth=0.0,
+            )
+
+        ax.set_title(f"delta_e = {delta_e:+d} deg")
+        ax.set_ylabel("Cm (Cm_pitch)")
+        ax.grid(True, linestyle="--", alpha=0.35)
+        ax.legend(title="Curve meaning", loc="best", fontsize=7.8, title_fontsize=8.5, framealpha=0.95)
+
+    axes[-1].set_xlabel("alpha (deg)")
+    fig.suptitle("Corrected BAL Data: Cm-alpha Curves by Elevator and Advance Ratio")
     fig.savefig(output_path, dpi=240)
     plt.close(fig)
 

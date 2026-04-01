@@ -1,7 +1,38 @@
 from pathlib import Path
 import re
 
+import numpy as np
 import pandas as pd
+
+
+PROP_DIAMETER_M = 0.2032
+
+# (run_start, run_end, V_nominal [m/s], n_hz [Hz], label)
+RUN_SCHEDULE = [
+    (1, 5, 40.0, None, "FREE"),
+    (6, 10, 40.0, 39.4, "BRK"),
+    (11, 15, 40.0, 55.1, "BRK"),
+    (16, 17, 40.0, 78.7, "ZERO"),
+    (18, 18, 40.0, 123.0, "MANDATORY"),
+    (19, 21, 40.0, 78.7, "ZERO"),
+    (22, 26, 20.0, None, "FREE"),
+    (27, 31, 20.0, 27.6, "BRK"),
+    (32, 32, 40.0, 78.7, "REPLICATE"),
+    (33, 37, 40.0, 39.4, "BRK"),
+    (38, 42, 40.0, 55.1, "BRK"),
+    (43, 47, 40.0, 78.7, "ZERO"),
+    (48, 52, 40.0, None, "FREE"),
+    (53, 57, 20.0, None, "FREE"),
+    (58, 62, 20.0, 27.6, "BRK"),
+    (63, 63, 40.0, 78.7, "REPLICATE"),
+    (64, 64, 40.0, 123.0, "MANDATORY"),
+    (65, 69, 40.0, 39.4, "CAL"),
+    (70, 74, 40.0, 78.7, "CAL"),
+    (75, 79, 20.0, 27.6, "CAL"),
+    (80, 84, 20.0, 27.6, "BRK"),
+    (85, 89, 20.0, 22.0, "BRK"),
+    (90, 94, 40.0, None, "FREE"),
+]
 
 
 def parse_value(token: str):
@@ -71,8 +102,48 @@ def build_compiled_dataframe(bal_dir: Path) -> pd.DataFrame:
         data = data.dropna(subset=["Run_nr"])
         data["Run_nr"] = data["Run_nr"].astype(int)
         data = data.sort_values(by=["Run_nr", "source_file"]).reset_index(drop=True)
+        data = add_operating_columns(data)
 
     return data
+
+
+def lookup_schedule(run_nr: int) -> tuple[float | None, float | None, str | None]:
+    for start, end, v_nominal, n_hz, label in RUN_SCHEDULE:
+        if start <= run_nr <= end:
+            return v_nominal, n_hz, label
+    return None, None, None
+
+
+def add_operating_columns(data: pd.DataFrame) -> pd.DataFrame:
+    if data.empty:
+        return data.copy()
+    if "Run_nr" not in data.columns:
+        raise ValueError("Data must contain a 'Run_nr' column to map operating points.")
+
+    enriched = data.copy()
+    mapped = enriched["Run_nr"].astype(int).apply(lookup_schedule)
+    enriched["V_nominal"] = mapped.apply(lambda item: item[0])
+    enriched["prop_speed_hz"] = mapped.apply(lambda item: item[1])
+    enriched["test_block"] = mapped.apply(lambda item: item[2])
+
+    if "V" in enriched.columns:
+        measured_v = pd.to_numeric(enriched["V"], errors="coerce")
+    else:
+        measured_v = pd.Series(np.nan, index=enriched.index, dtype=float)
+
+    speed_for_j = measured_v.fillna(enriched["V_nominal"])
+
+    enriched["advance_ratio_J"] = np.where(
+        enriched["prop_speed_hz"].notna(),
+        speed_for_j / (enriched["prop_speed_hz"] * PROP_DIAMETER_M),
+        np.nan,
+    )
+    enriched["advance_ratio_nominal_J"] = np.where(
+        enriched["prop_speed_hz"].notna(),
+        enriched["V_nominal"] / (enriched["prop_speed_hz"] * PROP_DIAMETER_M),
+        np.nan,
+    )
+    return enriched
 
 
 def normalize_dataframe(data: pd.DataFrame, exclude_columns: set[str] | None = None) -> pd.DataFrame:
