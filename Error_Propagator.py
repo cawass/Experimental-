@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 
-# First pair and second pair used for replication-error calculations.
+# Two repeated cases used for replication-error calculations.
 PAIR_RUNS = [(17,32), (63, 46)]
 
 def load_compiled_data(file_path: Path) -> pd.DataFrame:
@@ -44,13 +44,9 @@ def build_pair_stats_table(
                 continue
 
             values = pd.Series([float(value_a), float(value_b)], dtype=float)
-            mean_value = float(values.mean())
-            std_deviation = float(values.std(ddof=1))
-            abs_diff = float(abs(value_a - value_b))
-            if mean_value == 0:
-                validation_deviation_pct = 0.0 if abs_diff == 0 else float("nan")
-            else:
-                validation_deviation_pct = abs_diff / abs(mean_value) * 100.0
+            mean_value = float(values.mean())         # mean
+            variance_value = float(values.var(ddof=1))  # sample variance
+            sigma_value = float(values.std(ddof=1))     # sample sigma
 
             rows.append(
                 {
@@ -61,8 +57,8 @@ def build_pair_stats_table(
                     "value_run_a": float(value_a),
                     "value_run_b": float(value_b),
                     "mean_value": mean_value,
-                    "std_deviation": std_deviation,
-                    "validation_deviation_pct": validation_deviation_pct,
+                    "variance": variance_value,
+                    "sigma": sigma_value,
                 }
             )
 
@@ -87,13 +83,21 @@ def main() -> None:
     pair_stats = build_pair_stats_table(data, PAIR_RUNS, value_columns)
     if pair_stats.empty:
         raise ValueError("No valid numeric values found to compute pair statistics.")
+    pair_stats = pair_stats.sort_values(["pair", "variable"]).reset_index(drop=True)
 
     output_file = base_dir / "BAL" / "replication_pair_stats.csv"
     pair_stats.to_csv(output_file, index=False)
 
     print(f"Saved pair stats: {output_file}")
-    print("\nColumns: value_run_a, value_run_b, mean_value, std_deviation, validation_deviation_pct")
-    print(pair_stats.head(12).to_string(index=False))
+    print("\nColumns: value_run_a, value_run_b, mean_value, variance, sigma")
+    for run_a, run_b in PAIR_RUNS:
+        pair_id = f"{run_a}-{run_b}"
+        pair_view = pair_stats[pair_stats["pair"] == pair_id]
+        if pair_view.empty:
+            print(f"\nRepeated pair {pair_id}: no valid numeric values.")
+            continue
+        print(f"\nRepeated pair {pair_id}:")
+        print(pair_view.to_string(index=False))
 
 
 if __name__ == "__main__":
