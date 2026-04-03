@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -28,8 +27,8 @@ MAX_TRIM_ABS_DELTAE = 10.0
 
 POINT_CLASS_ORDER = ["fit", "val", "out"]
 POINT_CLASS_STYLE = {
-    "fit": {"marker": "o", "label": "Fit pts"},
-    "val": {"marker": "D", "label": "Val"},
+    "fit": {"marker": ".", "label": "Fit pts"},
+    "val": {"marker": "x", "label": "Val"},
     "out": {"marker": "s", "label": "Out"},
 }
 
@@ -87,11 +86,6 @@ def _apply_axis_style(ax: plt.Axes) -> None:
     ax.yaxis.grid(True, which="major", linestyle="--", linewidth=0.7, color="#BDBDBD", alpha=0.9)
 
 
-def _lighten_color(color: tuple[float, float, float, float] | str, amount: float = 0.55) -> tuple[float, float, float]:
-    rgb = np.array(mcolors.to_rgb(color), dtype=float)
-    return tuple(rgb + (1.0 - rgb) * amount)
-
-
 def _enforce_required_j(df: pd.DataFrame) -> pd.DataFrame:
     keep_mask = np.zeros(len(df), dtype=bool)
     for j_keep in REQUIRED_J_LEVELS:
@@ -103,19 +97,41 @@ def _point_class_handles() -> list[Line2D]:
     handles: list[Line2D] = []
     for key in POINT_CLASS_ORDER:
         style = POINT_CLASS_STYLE[key]
-        handles.append(
-            Line2D(
+        if key == "out":
+            handle = Line2D(
                 [0],
                 [0],
                 linestyle="None",
                 marker=style["marker"],
-                markersize=5.6,
-                markerfacecolor="#DDDDDD",
+                markersize=4.8,
+                markerfacecolor="none",
                 markeredgecolor="black",
-                markeredgewidth=0.6,
+                markeredgewidth=0.8,
                 color="black",
                 label=style["label"],
             )
+        elif key == "val":
+            handle = Line2D(
+                [0],
+                [0],
+                linestyle="None",
+                marker=style["marker"],
+                markersize=5.0,
+                color="black",
+                label=style["label"],
+            )
+        else:
+            handle = Line2D(
+                [0],
+                [0],
+                linestyle="None",
+                marker=style["marker"],
+                markersize=6.0,
+                color="black",
+                label=style["label"],
+            )
+        handles.append(
+            handle
         )
     return handles
 
@@ -149,7 +165,6 @@ def _build_point_class_map(summary_df: pd.DataFrame) -> dict[tuple[float, int], 
 def _plot_cm_deltae_all_alpha(
     grouped: pd.DataFrame,
     output_path: Path,
-    j_color_map: dict[float, object],
     point_class_map: dict[tuple[float, int], str],
 ) -> None:
     """Plot Cm vs delta_e in one axis (all alpha, both J)."""
@@ -160,8 +175,9 @@ def _plot_cm_deltae_all_alpha(
     _apply_axis_style(ax)
 
     alpha_levels = sorted(grouped["alpha_key"].unique().tolist())
-    line_styles = ["-", "--", ":", "-."]
-    alpha_style_map = {int(a): line_styles[i % len(line_styles)] for i, a in enumerate(alpha_levels)}
+    alpha_cmap = plt.get_cmap("tab10")
+    alpha_color_map = {int(a): alpha_cmap(i % 10) for i, a in enumerate(alpha_levels)}
+    j_linestyle_map = {2.5: "-", 5.0: "--"}
 
     for j in REQUIRED_J_LEVELS:
         j_frame = grouped[np.isclose(grouped["J_key"], float(j))]
@@ -176,8 +192,7 @@ def _plot_cm_deltae_all_alpha(
             x = curve["delta_e_key"].to_numpy(dtype=float)
             y = curve["Cm_mean"].to_numpy(dtype=float)
             alpha_keys = curve["alpha_key"].to_numpy(dtype=int)
-            color = j_color_map[float(j)]
-            fill_color = _lighten_color(color, amount=0.60)
+            color = alpha_color_map[int(alpha_key)]
 
             # Explicit linear interpolation/fit over delta_e = [-10, 0, 10].
             m_interp, b_interp = _fit_line(x, y)
@@ -187,7 +202,7 @@ def _plot_cm_deltae_all_alpha(
                 x_interp,
                 y_interp,
                 color=color,
-                linestyle=alpha_style_map[int(alpha_key)],
+                linestyle=j_linestyle_map.get(float(j), "-"),
                 linewidth=1.5,
             )
 
@@ -198,32 +213,54 @@ def _plot_cm_deltae_all_alpha(
                 )
                 if not np.any(mask):
                     continue
-                ax.plot(
-                    x[mask],
-                    y[mask],
-                    linestyle="None",
-                    marker=POINT_CLASS_STYLE[cls]["marker"],
-                    markersize=5.2,
-                    markerfacecolor=fill_color,
-                    markeredgecolor="black",
-                    markeredgewidth=0.6,
-                    zorder=5,
-                )
+                if cls == "out":
+                    ax.plot(
+                        x[mask],
+                        y[mask],
+                        linestyle="None",
+                        marker="s",
+                        markersize=4.5,
+                        markerfacecolor="none",
+                        markeredgecolor=color,
+                        markeredgewidth=0.8,
+                        color=color,
+                        zorder=5,
+                    )
+                elif cls == "val":
+                    ax.plot(
+                        x[mask],
+                        y[mask],
+                        linestyle="None",
+                        marker="x",
+                        markersize=5.0,
+                        color=color,
+                        zorder=5,
+                    )
+                else:
+                    ax.plot(
+                        x[mask],
+                        y[mask],
+                        linestyle="None",
+                        marker=".",
+                        markersize=6.0,
+                        color=color,
+                        zorder=5,
+                    )
 
     ax.set_xlabel(r"$\delta_e$", fontweight="bold")
     ax.set_ylabel(r"$C_m$", fontweight="bold")
 
-    j_handles = [
-        Line2D([0], [0], color=j_color_map[float(j)], linestyle="-", linewidth=1.8, label=rf"$J={j:.1f}$")
-        for j in REQUIRED_J_LEVELS
-    ]
     alpha_handles = [
-        Line2D([0], [0], color="black", linestyle=alpha_style_map[int(a)], linewidth=1.3, label=rf"$a={int(a)}$")
+        Line2D([0], [0], color=alpha_color_map[int(a)], linestyle="-", linewidth=1.6, label=rf"$\alpha={int(a)}$")
         for a in alpha_levels
+    ]
+    j_handles = [
+        Line2D([0], [0], color="black", linestyle=j_linestyle_map[float(j)], linewidth=1.3, label=rf"$J={j:.1f}$")
+        for j in REQUIRED_J_LEVELS
     ]
 
     legend_main = ax.legend(
-        handles=j_handles + alpha_handles,
+        handles=alpha_handles + j_handles,
         loc="upper right",
         frameon=True,
         facecolor="white",
@@ -237,7 +274,7 @@ def _plot_cm_deltae_all_alpha(
             Line2D([0], [0], color="black", linestyle="-", linewidth=1.3, label="Lin interp."),
             *_point_class_handles(),
         ],
-        loc="lower right",
+        loc="lower left",
         frameon=True,
         facecolor="white",
         edgecolor="black",
@@ -285,9 +322,7 @@ def _plot_cl_cd_vs_deltae_all_alpha(
             y_cl = curve["CL_mean"].to_numpy(dtype=float)
             y_cd = curve["CD_mean"].to_numpy(dtype=float)
             color = alpha_color_map[int(alpha_key)]
-            fill_color = _lighten_color(color, amount=0.60)
             cls = point_class_map.get((float(j), int(alpha_key)), "val")
-            marker = POINT_CLASS_STYLE[cls]["marker"]
 
             # CL(delta_e): linear fit with all available points
             cl_m, cl_b = _fit_line(x, y_cl)
@@ -300,16 +335,36 @@ def _plot_cl_cd_vs_deltae_all_alpha(
                 linestyle=j_linestyle_map.get(float(j), "-"),
                 linewidth=1.2,
             )
-            ax_cl.plot(
-                x,
-                y_cl,
-                linestyle="None",
-                marker=marker,
-                markersize=5.2,
-                markerfacecolor=fill_color,
-                markeredgecolor="black",
-                markeredgewidth=0.6,
-            )
+            if cls == "out":
+                ax_cl.plot(
+                    x,
+                    y_cl,
+                    linestyle="None",
+                    marker="s",
+                    markersize=4.5,
+                    markerfacecolor="none",
+                    markeredgecolor=color,
+                    markeredgewidth=0.8,
+                    color=color,
+                )
+            elif cls == "val":
+                ax_cl.plot(
+                    x,
+                    y_cl,
+                    linestyle="None",
+                    marker="x",
+                    markersize=5.0,
+                    color=color,
+                )
+            else:
+                ax_cl.plot(
+                    x,
+                    y_cl,
+                    linestyle="None",
+                    marker=".",
+                    markersize=6.0,
+                    color=color,
+                )
 
             # CD(delta_e): quadratic fit with all available points (fallback to linear if needed)
             if len(np.unique(x)) >= 3:
@@ -326,16 +381,36 @@ def _plot_cl_cd_vs_deltae_all_alpha(
                 linestyle=j_linestyle_map.get(float(j), "-"),
                 linewidth=1.2,
             )
-            ax_cd.plot(
-                x,
-                y_cd,
-                linestyle="None",
-                marker=marker,
-                markersize=5.2,
-                markerfacecolor=fill_color,
-                markeredgecolor="black",
-                markeredgewidth=0.6,
-            )
+            if cls == "out":
+                ax_cd.plot(
+                    x,
+                    y_cd,
+                    linestyle="None",
+                    marker="s",
+                    markersize=4.5,
+                    markerfacecolor="none",
+                    markeredgecolor=color,
+                    markeredgewidth=0.8,
+                    color=color,
+                )
+            elif cls == "val":
+                ax_cd.plot(
+                    x,
+                    y_cd,
+                    linestyle="None",
+                    marker="x",
+                    markersize=5.0,
+                    color=color,
+                )
+            else:
+                ax_cd.plot(
+                    x,
+                    y_cd,
+                    linestyle="None",
+                    marker=".",
+                    markersize=6.0,
+                    color=color,
+                )
 
     ax_cl.set_xlabel(r"$\delta_e$", fontweight="bold")
     ax_cl.set_ylabel(r"$C_L$", fontweight="bold")
@@ -349,7 +424,7 @@ def _plot_cl_cd_vs_deltae_all_alpha(
             color=alpha_color_map[int(alpha)],
             linestyle="-",
             linewidth=1.6,
-            label=rf"$a={int(alpha)}$",
+            label=rf"$\alpha={int(alpha)}$",
         )
         for alpha in alpha_levels
     ]
@@ -360,19 +435,20 @@ def _plot_cl_cd_vs_deltae_all_alpha(
 
     legend_alpha = ax_cd.legend(
         handles=alpha_handles,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.55),
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.00),
         frameon=True,
         facecolor="white",
         edgecolor="black",
         framealpha=1.0,
         fancybox=False,
-        title="a",
+        title=r"$\alpha$",
     )
     ax_cd.add_artist(legend_alpha)
     legend_j = ax_cd.legend(
         handles=j_handles,
         loc="upper left",
+        bbox_to_anchor=(1.02, 0.62),
         frameon=True,
         facecolor="white",
         edgecolor="black",
@@ -383,7 +459,8 @@ def _plot_cl_cd_vs_deltae_all_alpha(
     ax_cd.add_artist(legend_j)
     ax_cd.legend(
         handles=_point_class_handles(),
-        loc="lower left",
+        loc="upper left",
+        bbox_to_anchor=(1.02, 0.35),
         frameon=True,
         facecolor="white",
         edgecolor="black",
@@ -392,7 +469,7 @@ def _plot_cl_cd_vs_deltae_all_alpha(
         title="pts",
     )
 
-    fig.subplots_adjust(left=0.08, right=0.79, top=0.96, bottom=0.14, wspace=0.25)
+    fig.subplots_adjust(left=0.08, right=0.74, top=0.96, bottom=0.14, wspace=0.25)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=300, facecolor="white", transparent=False, bbox_inches="tight")
     plt.close(fig)
@@ -409,37 +486,37 @@ def main() -> None:
     parser.add_argument(
         "--output-cm-alpha",
         type=Path,
-        default=Path(__file__).with_name("1_cm_deltae_40mps_all_alpha_j2p5_j5.png"),
+        default=Path(__file__).with_name("trimmed-1-cm-deltae-40mps-all-alpha-j2p5-j5.png"),
         help="Output path for Cm vs delta_e plot.",
     )
     parser.add_argument(
         "--output-clcd-deltae",
         type=Path,
-        default=Path(__file__).with_name("2_cl_cd_deltae_40mps_allalpha_j2p5_j5.png"),
+        default=Path(__file__).with_name("trimmed-2-cl-cd-deltae-40mps-all-alpha-j2p5-j5.png"),
         help="Output path for side-by-side CL/CD vs delta_e plot.",
     )
     parser.add_argument(
         "--output-cl",
         type=Path,
-        default=Path(__file__).with_name("3_trimmed_cl_vs_alpha_40mps.png"),
+        default=Path(__file__).with_name("trimmed-3-cl-vs-alpha-40mps.png"),
         help="Output path for trimmed CL vs alpha.",
     )
     parser.add_argument(
         "--output-cd",
         type=Path,
-        default=Path(__file__).with_name("4_trimmed_cd_vs_alpha_40mps.png"),
+        default=Path(__file__).with_name("trimmed-4-cd-vs-alpha-40mps.png"),
         help="Output path for trimmed CD vs alpha.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).with_name("5_trimmed_clcd_vs_alpha_40mps.png"),
+        default=Path(__file__).with_name("trimmed-5-clcd-vs-alpha-40mps.png"),
         help="Output path for trimmed CL/CD vs alpha.",
     )
     parser.add_argument(
         "--summary-output",
         type=Path,
-        default=Path(__file__).with_name("trimmed_clcd_condition_summary_40mps.csv"),
+        default=Path(__file__).with_name("trimmed-clcd-condition-summary-40mps.csv"),
         help="CSV output path with trimmed-condition values.",
     )
     parser.add_argument(
@@ -529,6 +606,7 @@ def main() -> None:
             "font.family": "DejaVu Sans",
             "font.size": 9,
             "axes.labelsize": 10,
+            "axes.titlesize": 10,
             "xtick.labelsize": 9,
             "ytick.labelsize": 9,
             "legend.fontsize": 9,
@@ -537,12 +615,9 @@ def main() -> None:
 
     point_class_map = _build_point_class_map(summary_df)
 
-    cm_j_cmap = plt.get_cmap("tab10")
-    cm_j_color_map = {j: cm_j_cmap(i % 10) for i, j in enumerate(REQUIRED_J_LEVELS)}
     _plot_cm_deltae_all_alpha(
         grouped=grouped,
         output_path=args.output_cm_alpha,
-        j_color_map=cm_j_color_map,
         point_class_map=point_class_map,
     )
     _plot_cl_cd_vs_deltae_all_alpha(
@@ -567,8 +642,6 @@ def main() -> None:
             continue
 
         series_color = color_map[j]
-        fill_color = _lighten_color(series_color, amount=0.60)
-
         alpha_fit = fit_curve["alpha_key"].to_numpy(dtype=float)
         cl_fit = fit_curve["CL_trim"].to_numpy(dtype=float)
         cd_fit = fit_curve["CD_trim"].to_numpy(dtype=float)
@@ -598,7 +671,6 @@ def main() -> None:
         item: dict[str, object] = {
             "j": float(j),
             "series_color": series_color,
-            "fill_color": fill_color,
             "alpha_solid": alpha_solid,
             "cl_solid": cl_solid,
             "cd_solid": cd_solid,
@@ -630,10 +702,9 @@ def main() -> None:
             x_solid = np.asarray(item["alpha_solid"], dtype=float)
             y_solid = np.asarray(item[solid_key], dtype=float)
             series_color = item["series_color"]
-            fill_color = item["fill_color"]
             j_value = float(item["j"])
 
-            line, = ax.plot(
+            ax.plot(
                 x_solid,
                 y_solid,
                 color=series_color,
@@ -658,11 +729,9 @@ def main() -> None:
                     interpolation["alpha_key"].to_numpy(dtype=float),
                     interpolation[metric_col].to_numpy(dtype=float),
                     linestyle="None",
-                    marker="o",
-                    markersize=5.2,
-                    markerfacecolor=fill_color,
-                    markeredgecolor="black",
-                    markeredgewidth=0.6,
+                    marker=".",
+                    markersize=6.0,
+                    color=series_color,
                     zorder=5,
                 )
             if len(validation) > 0:
@@ -670,11 +739,9 @@ def main() -> None:
                     validation["alpha_key"].to_numpy(dtype=float),
                     validation[metric_col].to_numpy(dtype=float),
                     linestyle="None",
-                    marker="D",
-                    markersize=5.7,
-                    markerfacecolor=fill_color,
-                    markeredgecolor="black",
-                    markeredgewidth=0.6,
+                    marker="x",
+                    markersize=5.0,
+                    color=series_color,
                 )
             if len(outside) > 0:
                 ax.plot(
@@ -682,10 +749,11 @@ def main() -> None:
                     outside[metric_col].to_numpy(dtype=float),
                     linestyle="None",
                     marker="s",
-                    markersize=5.6,
-                    markerfacecolor=fill_color,
-                    markeredgecolor="black",
-                    markeredgewidth=0.6,
+                    markersize=4.5,
+                    markerfacecolor="none",
+                    markeredgecolor=series_color,
+                    markeredgewidth=0.8,
+                    color=series_color,
                 )
 
             j_handles.append(
@@ -738,13 +806,13 @@ def main() -> None:
         output_path=args.output,
     )
 
-    print("Saved:")
-    print(args.output_cm_alpha)
-    print(args.output_clcd_deltae)
-    print(args.output_cl)
-    print(args.output_cd)
-    print(args.output)
-    print(args.summary_output)
+    print("Saved outputs:")
+    print(f"Plot - Cm vs delta_e (all alpha, J=2.5 and 5.0): {args.output_cm_alpha}")
+    print(f"Plot - CL/CD vs delta_e (side-by-side, all alpha): {args.output_clcd_deltae}")
+    print(f"Plot - Trimmed CL vs alpha: {args.output_cl}")
+    print(f"Plot - Trimmed CD vs alpha: {args.output_cd}")
+    print(f"Plot - Trimmed CL/CD vs alpha: {args.output}")
+    print(f"Table - Trimmed condition summary: {args.summary_output}")
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).with_name("1_cm_alpha_40mps_deltae_m10_10.png"),
+        default=Path(__file__).with_name("longitudinal-cm-alpha-40mps-deltae-m10-10.png"),
         help="Output figure path.",
     )
     parser.add_argument(
@@ -98,7 +98,7 @@ def main() -> None:
     parser.add_argument(
         "--gradient-output",
         type=Path,
-        default=Path(__file__).with_name("cm_alpha_gradient_vs_J_40mps.png"),
+        default=Path(__file__).with_name("longitudinal-cm-alpha-gradient-vs-j-40mps.png"),
         help="Output figure path for gradient vs J plot.",
     )
     parser.add_argument(
@@ -204,7 +204,6 @@ def main() -> None:
         panel = valid[valid["delta_e_key"] == delta_e].copy()
         added_validation_legend = False
         added_outside_scope_legend = False
-        added_sigma_legend = False
         panel_x_values: list[float] = []
 
         for j in j_levels:
@@ -236,18 +235,6 @@ def main() -> None:
                 markersize=5.0,
                 color=color,
             )
-            ax.errorbar(
-                x_fit_pts,
-                y_fit_pts,
-                yerr=float(args.sigma_plot_factor) * float(args.sigma_cm),
-                fmt="none",
-                ecolor=color,
-                elinewidth=0.9,
-                capsize=2.0,
-                alpha=0.95,
-                label=rf"${int(args.sigma_plot_factor)}\sigma$" if not added_sigma_legend else None,
-            )
-            added_sigma_legend = True
             if len(val_curve) > 0:
                 x_val = val_curve["alpha_corr_mean"].to_numpy(dtype=float)
                 y_val = val_curve["CMpitch_mean"].to_numpy(dtype=float)
@@ -266,6 +253,17 @@ def main() -> None:
             if len(outside_curve) > 0:
                 x_out = outside_curve["alpha_corr_mean"].to_numpy(dtype=float)
                 y_out = outside_curve["CMpitch_mean"].to_numpy(dtype=float)
+                x_extrap_end = float(np.max(x_out))
+                if x_extrap_end > x_core_max:
+                    x_extrap = np.linspace(x_core_max, x_extrap_end, 120)
+                    y_extrap = slope * x_extrap + intercept
+                    ax.plot(
+                        x_extrap,
+                        y_extrap,
+                        color=color,
+                        linewidth=1.6,
+                        linestyle="--",
+                    )
                 ax.plot(
                     x_out,
                     y_out,
@@ -339,7 +337,8 @@ def main() -> None:
         ax_g.plot(
             xj,
             yg,
-            linestyle="None",
+            linestyle="-",
+            linewidth=1.2,
             marker=".",
             color=color,
             markersize=9.0,
@@ -384,11 +383,11 @@ def main() -> None:
     regression_df = pd.DataFrame(regression_rows).sort_values(["delta_e_deg"], kind="stable")
     regression_df.to_csv(args.gradient_summary_output, index=False)
 
-    print("Saved:")
-    print(args.output)
-    print(args.fit_summary_output)
-    print(args.gradient_output)
-    print(args.gradient_summary_output)
+    print("Saved outputs:")
+    print(f"Plot - Cm vs alpha (delta_e=-10 and 10): {args.output}")
+    print(f"Table - Cm-alpha fit summary: {args.fit_summary_output}")
+    print(f"Plot - dCm/dalpha vs J: {args.gradient_output}")
+    print(f"Table - Gradient-vs-J regression summary: {args.gradient_summary_output}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Plot CL/CD delta-e behavior and effectiveness from corrected data at ~40 m/s.
 
 Outputs:
-1) CL vs delta_e for multiple J (alpha=-2 and alpha=8 panels).
+1) CL vs delta_e for multiple J (single panel at alpha closest to 0 deg).
 2) Combined CL/CD vs delta_e figure (CL left, CD right; both alpha rows).
 3) dCL/d(delta_e) vs J.
 4) dCD/d(delta_e) vs J.
@@ -77,25 +77,25 @@ def main() -> None:
     parser.add_argument(
         "--cl-deltae-output",
         type=Path,
-        default=Path(__file__).with_name("cl_deltae_40mps_alpha_m2_8.png"),
+        default=Path(__file__).with_name("elevator-effectiveness-cl-deltae-40mps-alpha-m2-8.png"),
         help="Output figure path for CL vs delta_e.",
     )
     parser.add_argument(
         "--cl-effectiveness-output",
         type=Path,
-        default=Path(__file__).with_name("cl_effectiveness_vs_J_40mps_alpha_m2_8.png"),
+        default=Path(__file__).with_name("elevator-effectiveness-cl-effectiveness-vs-j-40mps-alpha-m2-8.png"),
         help="Output figure path for dCL/d(delta_e) vs J.",
     )
     parser.add_argument(
         "--cd-deltae-output",
         type=Path,
-        default=Path(__file__).with_name("2_cl_cd_deltae_40mps_alpha_m2_8.png"),
+        default=Path(__file__).with_name("elevator-effectiveness-cl-cd-deltae-40mps-alpha-m2-8.png"),
         help="Output figure path for combined CL/CD vs delta_e.",
     )
     parser.add_argument(
         "--cd-effectiveness-output",
         type=Path,
-        default=Path(__file__).with_name("cd_effectiveness_vs_J_40mps_alpha_m2_8.png"),
+        default=Path(__file__).with_name("elevator-effectiveness-cd-effectiveness-vs-j-40mps-alpha-m2-8.png"),
         help="Output figure path for dCD/d(delta_e) vs J.",
     )
     parser.add_argument(
@@ -124,7 +124,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    alpha_panels = [-2, 8]
+    alpha_target_key = 0
     deltae_fit_points = [-10, 10]
     deltae_validation_points = [0]
     excluded_j = 1.6
@@ -160,6 +160,8 @@ def main() -> None:
         raise RuntimeError("No valid alpha/J groups found for the requested filters.")
 
     j_levels = sorted(valid["J_key"].unique().tolist())
+    alpha_levels_available = sorted(valid["alpha_key"].unique().tolist())
+    alpha_panels = [min(alpha_levels_available, key=lambda a: abs(a - alpha_target_key))]
     cmap = plt.get_cmap("tab10")
     color_map = {j: cmap(index % 10) for index, j in enumerate(j_levels)}
 
@@ -278,9 +280,13 @@ def main() -> None:
         return add_validation_label
 
     def _plot_cl_vs_deltae(output_path: Path) -> None:
-        fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.9), sharey=False, facecolor="white")
+        n_panels = len(alpha_panels)
+        fig_width = 7.8 if n_panels == 1 else 11.0
+        fig, axes = plt.subplots(1, n_panels, figsize=(fig_width, 4.9), sharey=False, facecolor="white")
         fig.patch.set_facecolor("white")
         fig.patch.set_alpha(1.0)
+        if n_panels == 1:
+            axes = [axes]
 
         for ax, alpha_key in zip(axes, alpha_panels):
             _apply_axis_style(ax)
@@ -400,28 +406,16 @@ def main() -> None:
                 continue
 
             alpha_corr_panel = float(curve["alpha_corr_mean_for_panel"].mean())
-            if alpha_key in [0, 4]:
-                label = rf"$\alpha\approx{alpha_corr_panel:.2f}$ (Validation points)"
-                marker = "x"
-                markersize = 6.0
-            elif alpha_key == 12:
-                label = rf"$\alpha\approx{alpha_corr_panel:.2f}$ (Outside linear scope)"
-                marker = "s"
-                markersize = 5.0
-            else:
-                label = rf"$\alpha\approx{alpha_corr_panel:.2f}$"
-                marker = "."
-                markersize = 8.0
 
             ax.plot(
                 curve["J_level"].to_numpy(dtype=float),
                 curve[slope_column].to_numpy(dtype=float),
                 linestyle="-",
                 linewidth=1.2,
-                marker=marker,
-                markersize=markersize,
+                marker=".",
+                markersize=9.0,
                 color=alpha_color_map.get(alpha_key, "black"),
-                label=label,
+                label=rf"Data ($\alpha\approx{alpha_corr_panel:.2f}$)",
             )
 
         ax.axvline(
@@ -449,16 +443,12 @@ def main() -> None:
         plt.close(fig)
 
     _plot_cl_vs_deltae(args.cl_deltae_output)
-    _plot_cl_cd_deltae_side_by_side(args.cd_deltae_output)
     _plot_slope_vs_j("slope_dCL_ddeltae", r"$\mathrm{d}C_L/\mathrm{d}\delta_e$", args.cl_effectiveness_output)
-    _plot_slope_vs_j("slope_dCD_ddeltae", r"$\mathrm{d}C_D/\mathrm{d}\delta_e$", args.cd_effectiveness_output)
 
-    print("Saved:")
-    print(args.cl_deltae_output)
-    print(args.cl_effectiveness_output)
-    print(args.cd_deltae_output)
-    print(args.cd_effectiveness_output)
-    print(args.summary_output)
+    print("Saved outputs:")
+    print(f"Plot - CL vs delta_e: {args.cl_deltae_output}")
+    print(f"Plot - dCL/d(delta_e) vs J: {args.cl_effectiveness_output}")
+    print(f"Table - CL/CD delta_e effectiveness summary: {args.summary_output}")
 
 
 if __name__ == "__main__":

@@ -60,13 +60,13 @@ def main() -> None:
     parser.add_argument(
         "--cm-deltae-output",
         type=Path,
-        default=Path(__file__).with_name("cm_deltae_40mps_alpha_m2_8.png"),
+        default=Path(__file__).with_name("controll-power-cm-deltae-40mps.png"),
         help="Output figure path for Cm vs delta_e.",
     )
     parser.add_argument(
         "--slope-output",
         type=Path,
-        default=Path(__file__).with_name("cm_slope_deltae_vs_J_40mps.png"),
+        default=Path(__file__).with_name("controll-power-cm-slope-deltae-vs-j-40mps.png"),
         help="Output figure path for dCm/d(delta_e) vs J.",
     )
     parser.add_argument(
@@ -93,10 +93,16 @@ def main() -> None:
         default=2.5,
         help="J value used for the zero-thrust reference line in slope-vs-J.",
     )
+    parser.add_argument(
+        "--alpha-target",
+        type=int,
+        default=0,
+        help="Nominal AoA (deg) used for the control-power plots (default: 0).",
+    )
     args = parser.parse_args()
 
-    # Assumption: keep the same two core alpha cases used in your previous plot set.
-    alpha_panels = [-2, 8]
+    # Use one AoA case for control-power plots.
+    alpha_panels = [int(args.alpha_target)]
     deltae_fit_points = [-10, 10]
     deltae_validation_points = [0]
 
@@ -104,7 +110,6 @@ def main() -> None:
 
     filtered = data[
         (np.abs(data["V_mps"] - args.target_speed) <= args.speed_tol)
-        & (data["alpha_key"].isin(alpha_panels))
         & (data["delta_e_key"].isin(deltae_fit_points + deltae_validation_points))
     ].copy()
 
@@ -144,15 +149,38 @@ def main() -> None:
         }
     )
 
-    # Figure 1: Cm vs delta_e (two alpha panels).
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.9), sharey=False, facecolor="white")
+    # Figure 1: Cm vs delta_e (single alpha panel).
+    fig_width = 7.8 if len(alpha_panels) == 1 else 11.0
+    fig, axes = plt.subplots(1, len(alpha_panels), figsize=(fig_width, 4.9), sharey=False, facecolor="white")
     fig.patch.set_facecolor("white")
     fig.patch.set_alpha(1.0)
+    if len(alpha_panels) == 1:
+        axes = [axes]
 
     cmap = plt.get_cmap("tab10")
     color_map = {j: cmap(index % 10) for index, j in enumerate(j_levels)}
 
+    # Build slope/intercept summary for all available alpha/J groups.
     fit_rows: list[dict[str, float | int]] = []
+    for (alpha_key, j_key), curve in valid.groupby(["alpha_key", "J_key"]):
+        fit_curve = curve[curve["delta_e_key"].isin(deltae_fit_points)].sort_values("delta_e_key")
+        if len(fit_curve) != len(deltae_fit_points):
+            continue
+
+        x_fit_pts = fit_curve["delta_e_key"].to_numpy(dtype=float)
+        y_fit_pts = fit_curve["Cm_mean"].to_numpy(dtype=float)
+        slope, intercept = _fit_line(x_fit_pts, y_fit_pts)
+
+        fit_rows.append(
+            {
+                "alpha_key": int(alpha_key),
+                "alpha_corr_mean_for_panel": float(curve["alpha_corr_mean"].mean()),
+                "J_level": float(j_key),
+                "slope_dCm_ddeltae": float(slope),
+                "intercept": float(intercept),
+            }
+        )
+
     for ax, alpha_key in zip(axes, alpha_panels):
         _apply_axis_style(ax)
         panel = valid[valid["alpha_key"] == alpha_key].copy()
@@ -197,16 +225,6 @@ def main() -> None:
                 )
                 added_validation_legend = True
 
-            fit_rows.append(
-                {
-                    "alpha_key": int(alpha_key),
-                    "alpha_corr_mean_for_panel": float(panel["alpha_corr_mean"].mean()),
-                    "J_level": float(j),
-                    "slope_dCm_ddeltae": float(slope),
-                    "intercept": float(intercept),
-                }
-            )
-
         ax.set_xlabel(r"$\delta_e$", fontweight="bold")
         alpha_corr_panel = float(panel["alpha_corr_mean"].mean()) if len(panel) > 0 else float(alpha_key)
         subcaption = rf"$V={args.target_speed:.0f}\,\mathrm{{m/s}},\ \alpha\approx{alpha_corr_panel:.2f}$"
@@ -236,8 +254,10 @@ def main() -> None:
     fig2.patch.set_alpha(1.0)
     _apply_axis_style(ax2)
 
-    alpha_color_map = {alpha_panels[0]: plt.get_cmap("tab10")(0), alpha_panels[1]: plt.get_cmap("tab10")(3)}
-    for alpha_key in alpha_panels:
+    alpha_levels = sorted(summary_df["alpha_key"].unique().tolist())
+    alpha_cmap = plt.get_cmap("tab10")
+    alpha_color_map = {alpha_key: alpha_cmap(i % 10) for i, alpha_key in enumerate(alpha_levels)}
+    for alpha_key in alpha_levels:
         curve = summary_df[summary_df["alpha_key"] == alpha_key].sort_values("J_level")
         if curve.empty:
             continue
@@ -245,7 +265,8 @@ def main() -> None:
         ax2.plot(
             curve["J_level"].to_numpy(dtype=float),
             curve["slope_dCm_ddeltae"].to_numpy(dtype=float),
-            linestyle="None",
+            linestyle="-",
+            linewidth=1.2,
             marker=".",
             markersize=9.0,
             color=alpha_color_map.get(alpha_key, "black"),
@@ -276,10 +297,10 @@ def main() -> None:
     fig2.savefig(args.slope_output, dpi=300, facecolor="white", transparent=False, bbox_inches="tight")
     plt.close(fig2)
 
-    print("Saved:")
-    print(args.cm_deltae_output)
-    print(args.slope_output)
-    print(args.fit_summary_output)
+    print("Saved outputs:")
+    print(f"Plot - Cm vs delta_e: {args.cm_deltae_output}")
+    print(f"Plot - dCm/d(delta_e) vs J: {args.slope_output}")
+    print(f"Table - Cm-delta_e fit summary: {args.fit_summary_output}")
 
 
 if __name__ == "__main__":

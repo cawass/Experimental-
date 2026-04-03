@@ -1,4 +1,4 @@
-"""Create a 3D design-space plot with J on the z-axis and a zero-thrust plane."""
+"""Create a 3D design-space plot with J on the z-axis and color by J."""
 
 from __future__ import annotations
 
@@ -31,20 +31,19 @@ def _load_columns(path: Path) -> pd.DataFrame:
 
 
 def _prepare_points(data: pd.DataFrame, j_round_decimals: int) -> pd.DataFrame:
-    """Round to design levels and compute point multiplicity."""
+    """Round to design levels and keep unique design points."""
     out = data.copy()
     out["alpha"] = np.rint(out["AoA_deg"]).astype(int)
     out["delta_e"] = np.rint(out["elevator_deflection_deg"]).astype(int)
     out["J"] = np.round(out["J_avg"], j_round_decimals)
 
-    counts = (
-        out.groupby(["delta_e", "alpha", "J"], as_index=False)
-        .size()
-        .rename(columns={"size": "n_points"})
+    unique_points = (
+        out[["delta_e", "alpha", "J"]]
+        .drop_duplicates()
         .sort_values(["delta_e", "alpha", "J"], kind="stable")
         .reset_index(drop=True)
     )
-    return counts
+    return unique_points
 
 
 def main() -> None:
@@ -73,6 +72,18 @@ def main() -> None:
         default=2.5,
         help="J value used for the zero-thrust plane.",
     )
+    parser.add_argument(
+        "--show",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Show interactive 3D window so you can rotate and choose the view.",
+    )
+    parser.add_argument(
+        "--save",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Save the plot image to --output.",
+    )
     args = parser.parse_args()
 
     raw = _load_columns(args.input)
@@ -96,7 +107,7 @@ def main() -> None:
         points["delta_e"],
         points["alpha"],
         points["J"],
-        c=points["n_points"],
+        c=points["J"],
         cmap="viridis",
         s=62,
         marker="o",
@@ -150,15 +161,19 @@ def main() -> None:
     ax.text2D(0.03, 0.95, r"Zero thrust plane: $J_0=2.5$", transform=ax.transAxes, color="red")
 
     colorbar = fig.colorbar(scatter, ax=ax, pad=0.08, shrink=0.85)
-    colorbar.set_label("Number of points", fontweight="bold")
+    colorbar.set_label(r"$J$", fontweight="bold")
 
     fig.tight_layout()
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.output, dpi=300, facecolor="white", transparent=False)
-    plt.close(fig)
+    if args.save:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(args.output, dpi=300, facecolor="white", transparent=False)
+        print("Saved:")
+        print(args.output)
 
-    print("Saved:")
-    print(args.output)
+    if args.show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 if __name__ == "__main__":
