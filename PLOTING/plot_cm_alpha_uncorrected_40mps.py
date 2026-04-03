@@ -122,8 +122,14 @@ def main() -> None:
     parser.add_argument(
         "--sigma-cm",
         type=float,
-        default=0.002011,
+        default=0.00122,
         help="One-sigma Cm uncertainty (kept for exported summary values).",
+    )
+    parser.add_argument(
+        "--sigma-plot-factor",
+        type=float,
+        default=3.0,
+        help="Multiplier applied to sigma_Cm for plotted error bars (default: 3).",
     )
     parser.add_argument(
         "--zero-thrust-j",
@@ -198,6 +204,7 @@ def main() -> None:
         panel = valid[valid["delta_e_key"] == delta_e].copy()
         added_validation_legend = False
         added_outside_scope_legend = False
+        added_sigma_legend = False
         panel_x_values: list[float] = []
 
         for j in j_levels:
@@ -229,6 +236,18 @@ def main() -> None:
                 markersize=5.0,
                 color=color,
             )
+            ax.errorbar(
+                x_fit_pts,
+                y_fit_pts,
+                yerr=float(args.sigma_plot_factor) * float(args.sigma_cm),
+                fmt="none",
+                ecolor=color,
+                elinewidth=0.9,
+                capsize=2.0,
+                alpha=0.95,
+                label=rf"${int(args.sigma_plot_factor)}\sigma$" if not added_sigma_legend else None,
+            )
+            added_sigma_legend = True
             if len(val_curve) > 0:
                 x_val = val_curve["alpha_corr_mean"].to_numpy(dtype=float)
                 y_val = val_curve["CMpitch_mean"].to_numpy(dtype=float)
@@ -247,11 +266,6 @@ def main() -> None:
             if len(outside_curve) > 0:
                 x_out = outside_curve["alpha_corr_mean"].to_numpy(dtype=float)
                 y_out = outside_curve["CMpitch_mean"].to_numpy(dtype=float)
-                x_extrap_end = float(np.max(x_out))
-                if x_extrap_end > x_core_max:
-                    x_extrap = np.linspace(x_core_max, x_extrap_end, 120)
-                    y_extrap = slope * x_extrap + intercept
-                    ax.plot(x_extrap, y_extrap, color=color, linewidth=1.6, linestyle="--")
                 ax.plot(
                     x_out,
                     y_out,

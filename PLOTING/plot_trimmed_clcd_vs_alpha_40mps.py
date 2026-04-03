@@ -3,7 +3,7 @@
 All outputs are strictly filtered to J = 2.5 and J = 5.0.
 
 Output files:
-1) Cm vs alpha (all delta_e, both J)
+1) Cm vs delta_e (all alpha, both J)
 2) CL vs delta_e and CD vs delta_e (side by side, all alpha, both J)
 3) Trimmed CL vs alpha
 4) Trimmed CD vs alpha
@@ -146,40 +146,50 @@ def _build_point_class_map(summary_df: pd.DataFrame) -> dict[tuple[float, int], 
     return point_class_map
 
 
-def _plot_cm_alpha_all_deltae(
+def _plot_cm_deltae_all_alpha(
     grouped: pd.DataFrame,
     output_path: Path,
     j_color_map: dict[float, object],
     point_class_map: dict[tuple[float, int], str],
 ) -> None:
-    """Plot Cm vs alpha in one axis (all delta_e, both J)."""
+    """Plot Cm vs delta_e in one axis (all alpha, both J)."""
     fig = plt.figure(figsize=(8.8, 5.0), facecolor="white")
     fig.patch.set_facecolor("white")
     fig.patch.set_alpha(1.0)
     ax = fig.add_subplot(1, 1, 1)
     _apply_axis_style(ax)
 
-    delta_levels = sorted(grouped["delta_e_key"].unique().tolist())
+    alpha_levels = sorted(grouped["alpha_key"].unique().tolist())
     line_styles = ["-", "--", ":", "-."]
-    delta_style_map = {int(de): line_styles[i % len(line_styles)] for i, de in enumerate(delta_levels)}
+    alpha_style_map = {int(a): line_styles[i % len(line_styles)] for i, a in enumerate(alpha_levels)}
 
     for j in REQUIRED_J_LEVELS:
         j_frame = grouped[np.isclose(grouped["J_key"], float(j))]
         if j_frame.empty:
             continue
 
-        for delta_e in delta_levels:
-            curve = j_frame[j_frame["delta_e_key"] == delta_e].sort_values("alpha_key")
+        for alpha_key in alpha_levels:
+            curve = j_frame[j_frame["alpha_key"] == alpha_key].sort_values("delta_e_key")
             if curve.empty:
                 continue
 
-            x = curve["alpha_corr_mean"].to_numpy(dtype=float)
+            x = curve["delta_e_key"].to_numpy(dtype=float)
             y = curve["Cm_mean"].to_numpy(dtype=float)
             alpha_keys = curve["alpha_key"].to_numpy(dtype=int)
             color = j_color_map[float(j)]
             fill_color = _lighten_color(color, amount=0.60)
 
-            ax.plot(x, y, color=color, linestyle=delta_style_map[int(delta_e)], linewidth=1.4)
+            # Explicit linear interpolation/fit over delta_e = [-10, 0, 10].
+            m_interp, b_interp = _fit_line(x, y)
+            x_interp = np.linspace(float(np.min(x)), float(np.max(x)), 180)
+            y_interp = m_interp * x_interp + b_interp
+            ax.plot(
+                x_interp,
+                y_interp,
+                color=color,
+                linestyle=alpha_style_map[int(alpha_key)],
+                linewidth=1.5,
+            )
 
             for cls in POINT_CLASS_ORDER:
                 mask = np.array(
@@ -200,21 +210,21 @@ def _plot_cm_alpha_all_deltae(
                     zorder=5,
                 )
 
-    ax.set_xlabel(r"$\alpha$", fontweight="bold")
+    ax.set_xlabel(r"$\delta_e$", fontweight="bold")
     ax.set_ylabel(r"$C_m$", fontweight="bold")
 
     j_handles = [
         Line2D([0], [0], color=j_color_map[float(j)], linestyle="-", linewidth=1.8, label=rf"$J={j:.1f}$")
         for j in REQUIRED_J_LEVELS
     ]
-    de_handles = [
-        Line2D([0], [0], color="black", linestyle=delta_style_map[int(de)], linewidth=1.3, label=rf"$\delta_e={int(de)}$")
-        for de in delta_levels
+    alpha_handles = [
+        Line2D([0], [0], color="black", linestyle=alpha_style_map[int(a)], linewidth=1.3, label=rf"$a={int(a)}$")
+        for a in alpha_levels
     ]
 
     legend_main = ax.legend(
-        handles=j_handles + de_handles,
-        loc="upper left",
+        handles=j_handles + alpha_handles,
+        loc="upper right",
         frameon=True,
         facecolor="white",
         edgecolor="black",
@@ -223,7 +233,10 @@ def _plot_cm_alpha_all_deltae(
     )
     ax.add_artist(legend_main)
     ax.legend(
-        handles=_point_class_handles(),
+        handles=[
+            Line2D([0], [0], color="black", linestyle="-", linewidth=1.3, label="Lin interp."),
+            *_point_class_handles(),
+        ],
         loc="lower right",
         frameon=True,
         facecolor="white",
@@ -396,8 +409,8 @@ def main() -> None:
     parser.add_argument(
         "--output-cm-alpha",
         type=Path,
-        default=Path(__file__).with_name("1_cm_alpha_40mps_all_deltae_j2p5_j5.png"),
-        help="Output path for Cm vs alpha plot.",
+        default=Path(__file__).with_name("1_cm_deltae_40mps_all_alpha_j2p5_j5.png"),
+        help="Output path for Cm vs delta_e plot.",
     )
     parser.add_argument(
         "--output-clcd-deltae",
@@ -526,7 +539,7 @@ def main() -> None:
 
     cm_j_cmap = plt.get_cmap("tab10")
     cm_j_color_map = {j: cm_j_cmap(i % 10) for i, j in enumerate(REQUIRED_J_LEVELS)}
-    _plot_cm_alpha_all_deltae(
+    _plot_cm_deltae_all_alpha(
         grouped=grouped,
         output_path=args.output_cm_alpha,
         j_color_map=cm_j_color_map,
